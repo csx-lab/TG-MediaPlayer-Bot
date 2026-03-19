@@ -1,4 +1,4 @@
 pyrogram==2.0.101
 tgcrypto>=1.2.0
-git+https://github.com/pytgcalls/pytgcalls.git@master#egg=py-tgcalls
+git+https://github.com/pytgcalls/pytgcalls.git@master#egg=py-tgcalls&dummy=20260319
 imageio-ffmpeg
