@@ -1,0 +1,10 @@
+{
+    "name": "MediaPlayerBOT",
+    "description": "A telegram bot that plays media.",
+    "env": {
+        "BOT_TOKEN": {
+            "description": "Telegram bot token",
+            "required": true
+        }
+    }
+}
