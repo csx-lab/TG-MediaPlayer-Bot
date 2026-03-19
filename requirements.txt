@@ -1,4 +1,7 @@
-pyrogram==2.0.101
+-pyrogram==2.0.101
++pyrogram==2.0.101  # force rebuild
+tgcrypto>=1.2.0
+git+https://github.com/pytgcalls/pytgcalls.git@master#egg=py-tgcallspyrogram==2.0.101
 tgcrypto>=1.2.0
 # Latest PyTgCalls from GitHub (master branch)
 git+https://github.com/pytgcalls/pytgcalls.git@master#egg=py-tgcalls
