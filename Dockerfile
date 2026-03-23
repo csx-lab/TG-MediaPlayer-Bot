@@ -1,6 +1,10 @@
+# Use the official Python 3.10 slim image as the base image
 FROM python:3.10-slim
 
-# Install system dependencies
+# Set environment variables (adjust these as needed)
+ENV PYTHONUNBUFFERED=1
+
+# Install required system dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
@@ -11,41 +15,33 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js (as required by your project)
+# Install Node.js (since you also need it based on your initial setup)
 RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
     && apt-get install -y nodejs
 
-# Check Node.js installation
-RUN echo "Checking Node.js installation..." \
-    && node -v \
-    && npm -v
+# --- Check if Node.js and npm are installed properly ---
+RUN echo "Checking Node.js installation..." && \
+    node -v && \
+    npm -v
 
-# Set up a virtual environment
-RUN python -m venv /env
-ENV PATH="/env/bin:$PATH"
-
-# Set the working directory
+# Set the working directory inside the container
 WORKDIR /app
 
-# Copy the application code first
-COPY . .
-
-# Replace the `InputMode` import from `ntgcalls` with an alternative from `py_tgcalls`
-RUN sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' /app/main.py
-# Patching the imports in `media_stream.py` to replace ntgcalls with py_tgcalls
-RUN sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' /app/env/lib/python3.10/site-packages/pytgcalls/types/stream/media_stream.py
-
-# Install Python dependencies
+# Copy the requirements.txt and install Python dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install py-tgcalls explicitly to avoid any dependency conflicts
-RUN pip uninstall -y pytgcalls ntgcalls && pip install py-tgcalls
+# --- Ensure virtual environment is created and activated ---
+RUN python -m venv /env
 
-# Install aiofiles==0.8.0 explicitly if needed
-RUN pip install aiofiles==0.8.0
+# --- Install dependencies into virtual environment ---
+RUN /env/bin/pip install --no-cache-dir -r requirements.txt
 
-# Install any other necessary dependencies (in case of missing packages)
-RUN pip install --upgrade pip
+# Copy the application code into the container
+COPY . .
 
-# Set the entrypoint for your app (update as per your application entry point)
-CMD ["python", "main.py"]
+# --- Patch the imports after installing dependencies ---
+RUN sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' /app/env/lib/python3.10/site-packages/pytgcalls/types/stream/media_stream.py
+
+# Set the entrypoint for the application
+CMD ["/env/bin/python", "main.py"]
