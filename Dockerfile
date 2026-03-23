@@ -39,7 +39,7 @@ RUN /env/bin/pip install --no-cache-dir -r requirements.txt
 
 # --- Ensure py_tgcalls is installed if it’s a local module or PyPI package ---
 # Option 1: Install py_tgcalls from PyPI (if available)
-RUN pip install py_tgcalls==<version>  # Replace with the correct version if needed
+RUN pip install py_tgcalls==2.2.11
 
 # Option 2: If py_tgcalls is a local package, copy and install it
 # COPY py_tgcalls /app/py_tgcalls
