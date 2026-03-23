@@ -1,3 +1,4 @@
-pyrogram==2.0.42
-tgcrypto
-pytgcalls==2.4.1
+pyrogram==2.0.106
+tgcrypto==1.2.3
+pytgcalls==2.3.1
+aiofiles==23.1.0
