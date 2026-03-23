@@ -40,8 +40,13 @@ RUN /env/bin/pip install --no-cache-dir -r requirements.txt
 # Copy the application code into the container
 COPY . .
 
-# --- Patch the imports after installing dependencies ---
-RUN sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' /app/env/lib/python3.10/site-packages/pytgcalls/types/stream/media_stream.py
+# --- Wait for dependencies to be installed before patching imports ---
+# Patch the imports to replace ntgcalls with py_tgcalls
+# Ensure the file exists before applying the sed command
+RUN if [ -f "/app/env/lib/python3.10/site-packages/pytgcalls/types/stream/media_stream.py" ]; then \
+    sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' /app/env/lib/python3.10/site-packages/pytgcalls/types/stream/media_stream.py; \
+    else echo "media_stream.py not found!"; \
+    fi
 
 # Set the entrypoint for the application
 CMD ["/env/bin/python", "main.py"]
