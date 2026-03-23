@@ -1,3 +1,5 @@
 #!/bin/bash
-# Just start the bot; FFmpeg is handled by imageio-ffmpeg
+# Activate virtualenv
+source ./venv/bin/activate
+# Start bot
 python main.py
