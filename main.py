@@ -3,7 +3,7 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pytgcalls import PyTgCalls
-from pytgcalls.types.input_stream import InputAudioStream, InputVideoStream
+from pytgcalls.types import InputAudioStream, InputVideoStream
 import imageio_ffmpeg as ffmpeg  # ensures FFmpeg is available
 
 # force rebuild at 2026-03-19
@@ -62,7 +62,14 @@ async def vplay_handler(client: Client, message: Message):
 
         try:
             await pytgcalls.join_group_call(chat_id, stream)
-            await asyncio.sleep(replied_msg.audio.duration if replied_msg.audio else 5)
+            duration = 5
+            if replied_msg.audio and replied_msg.audio.duration:
+                duration = replied_msg.audio.duration
+            elif replied_msg.video and replied_msg.video.duration:
+                duration = replied_msg.video.duration
+            elif replied_msg.voice and replied_msg.voice.duration:
+                duration = replied_msg.voice.duration
+            await asyncio.sleep(duration)
             await pytgcalls.leave_group_call(chat_id)
         except Exception as e:
             await message.reply_text(f"Playback error: {e}")
