@@ -28,6 +28,9 @@ RUN echo "Checking Node.js installation..." \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# https://github.com/pytgcalls/pytgcalls/discussions/234
+RUN pip install py-tgcalls
+
 # Install pytgcalls and other dependencies for the bot
 RUN pip install pytgcalls pyrogram
 
