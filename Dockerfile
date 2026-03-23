@@ -1,4 +1,4 @@
-# Start with the base image
+# Start with the base Python image (3.10-slim)
 FROM python:3.10-slim
 
 # Install system dependencies
@@ -35,14 +35,19 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Reinstall ntgcalls explicitly to avoid any potential issues
-RUN pip uninstall -y ntgcalls \
-    && pip install ntgcalls
+RUN pip uninstall -y ntgcalls && pip install ntgcalls
 
-# Install py-tgcalls as an alternative in case ntgcalls still causes issues
+# Install py-tgcalls as an alternative in case ntgcalls still doesn't work
 RUN pip install py-tgcalls
 
-# Install additional Python dependencies if required
+# Install aiofiles==0.8.0 explicitly if needed
 RUN pip install aiofiles==0.8.0
+
+# Install any other necessary dependencies (in case of missing packages)
+RUN pip install --upgrade pip
+
+# Replace the `InputMode` import from `ntgcalls` with an alternative if needed
+RUN sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' /app/main.py
 
 # Copy the rest of your application code
 COPY . .
