@@ -1,4 +1,4 @@
 pyrogram==2.0.106
 tgcrypto==1.2.3
-pytgcalls==2.1.0
+py-tgcalls==2.0.0  # Switch to py-tgcalls instead of pytgcalls
 aiofiles==0.8.0
