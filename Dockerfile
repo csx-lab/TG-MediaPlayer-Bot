@@ -37,7 +37,7 @@ RUN sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g'
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install py-tgcalls explicitly to avoid any dependency conflicts
-RUN pip uninstall -y ntgcalls && pip install py-tgcalls
+RUN pip uninstall -y pytgcalls ntgcalls && pip install py-tgcalls
 
 # Install aiofiles==0.8.0 explicitly if needed
 RUN pip install aiofiles==0.8.0
