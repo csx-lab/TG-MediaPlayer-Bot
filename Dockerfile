@@ -37,11 +37,18 @@ RUN python -m venv /env
 # --- Install dependencies into virtual environment ---
 RUN /env/bin/pip install --no-cache-dir -r requirements.txt
 
+# --- Ensure py_tgcalls is installed if it’s a local module or PyPI package ---
+# Option 1: Install py_tgcalls from PyPI (if available)
+RUN pip install py_tgcalls==<version>  # Replace with the correct version if needed
+
+# Option 2: If py_tgcalls is a local package, copy and install it
+# COPY py_tgcalls /app/py_tgcalls
+# RUN pip install /app/py_tgcalls
+
 # Copy the application code into the container
 COPY . .
 
 # --- Ensure all relevant imports are patched ---
-# Find all Python files under site-packages/pytgcalls and patch any imports from ntgcalls to py_tgcalls
 RUN find /env/lib/python3.10/site-packages/pytgcalls -type f -name "*.py" -exec sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' {} \;
 
 # Set the entrypoint for the application
