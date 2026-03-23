@@ -27,7 +27,10 @@ WORKDIR /app
 # Copy the requirements file and install dependencies
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install ntgcalls first (make sure it is compatible with the current Python version)
+RUN pip install --no-cache-dir ntgcalls
+
+# Install Python dependencies from requirements.txt (which includes py-tgcalls)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the code into the container
