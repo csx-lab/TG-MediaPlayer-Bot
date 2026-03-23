@@ -1,109 +1,78 @@
 import os
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
-from pytgcalls.types.input_stream import InputAudioStream, InputVideoStream
-from pytgcalls.types.input_stream.quality import HighQualityAudio
+from pytgcalls.types.input_stream import InputStream, InputAudioStream, InputVideoStream
+from pytgcalls.exceptions import GroupCallNotFound
 
-# --- Env vars ---
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-APPROVED_GROUPS = os.environ.get("APPROVED_GROUPS", "")  # comma-separated
+# Load environment variables
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+APPROVED_GROUPS = [int(gid.strip()) for gid in os.getenv("APPROVED_GROUPS", "").split(",")]
 
-approved_group_ids = [int(x) for x in APPROVED_GROUPS.split(",") if x.strip()]
-
-# --- Pyrogram + PyTgCalls clients ---
-app = Client("vplay_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 pytgcalls = PyTgCalls(app)
 
-# --- Helper ---
-def is_approved_group(chat_id: int) -> bool:
-    return chat_id in approved_group_ids
+# Track currently playing
+current_calls = {}
 
-# --- /displaygroupid (admin-only) ---
-@app.on_message(filters.command("displaygroupid") & filters.group)
-async def display_group_id(client: Client, message: Message):
-    if not message.from_user or not message.from_user.is_admin:
-        await message.reply_text("Only group admins can use this.")
+@app.on_message(filters.command("displaygroupid") & filters.user(filters.usernames(["me"])))
+async def display_group_id(client, message):
+    # Shows group IDs for admin purposes
+    chat = message.chat
+    await message.reply_text(f"Group ID: `{chat.id}`", parse_mode="markdown")
+
+@app.on_message(filters.command("play") & filters.chat(APPROVED_GROUPS))
+async def play_media(client, message):
+    """Play replied media in VC"""
+    if not message.reply_to_message or not message.reply_to_message.media:
+        await message.reply_text("Reply to a media file (audio/video) to play it in VC.")
         return
-    await message.reply_text(f"Group ID: `{message.chat.id}`", quote=True)
 
-# --- /play handler ---
-@app.on_message(filters.command("play") & filters.reply & filters.group)
-async def play_media(client: Client, message: Message):
     chat_id = message.chat.id
-    if not is_approved_group(chat_id):
-        await message.reply_text("This group is not approved for /play.")
-        return
 
-    replied_msg = message.reply_to_message
-    if not (replied_msg.audio or replied_msg.voice or replied_msg.video):
-        await message.reply_text("Reply must be to an audio/video message.")
-        return
+    # Join VC if not already joined
+    if chat_id not in current_calls:
+        try:
+            await pytgcalls.join_group_call(
+                chat_id,
+                InputStream(
+                    InputAudioStream("input.raw")  # placeholder, will replace with ffmpeg pipe
+                ),
+            )
+            current_calls[chat_id] = True
+        except GroupCallNotFound:
+            await message.reply_text("No active VC found. Please start one first.")
+            return
 
-    # Determine stream type
-    if replied_msg.audio or replied_msg.voice:
-        stream = InputAudioStream(
-            replied_msg.file_id,
-            quality=HighQualityAudio()
-        )
+    # Download media to temp file in memory (no permanent storage)
+    file_path = await app.download_media(message.reply_to_message)
+    if file_path.endswith((".mp4", ".mkv", ".webm")):
+        input_stream = InputStream(InputVideoStream(file_path))
     else:
-        stream = InputVideoStream(replied_msg.file_id)
+        input_stream = InputStream(InputAudioStream(file_path))
 
-    # Inline buttons
-    buttons = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("⏯ Pause/Resume", callback_data=f"pause_{chat_id}"),
-                InlineKeyboardButton("⏹ Stop", callback_data=f"stop_{chat_id}")
-            ]
-        ]
-    )
-    await message.reply_text("Starting playback...", reply_markup=buttons)
+    await pytgcalls.change_stream(chat_id, input_stream)
+    await message.reply_text(f"Streaming `{os.path.basename(file_path)}` in VC")
 
-    # Auto-join VC or start if not active
-    try:
-        await pytgcalls.join_group_call(chat_id, stream)
-    except Exception as e:
-        await message.reply_text(f"Error joining VC: {e}")
-        return
-
-# --- Button callbacks ---
-@app.on_callback_query()
-async def button_cb(client, callback_query):
-    data = callback_query.data
-    chat_id = int(data.split("_")[1])
-    action = data.split("_")[0]
-
-    if action == "pause":
-        try:
-            await pytgcalls.pause_stream(chat_id)
-        except:
-            await pytgcalls.resume_stream(chat_id)
-        await callback_query.answer("Toggled pause/resume")
-    elif action == "stop":
-        try:
-            await pytgcalls.leave_group_call(chat_id)
-            await callback_query.message.edit_text("Playback stopped.")
-        except:
-            await callback_query.answer("Failed to stop.")
-
-# --- Auto-leave after media ends ---
-@pytgcalls.on_stream_end()
-async def auto_leave(_, chat_id: int):
-    try:
+@app.on_message(filters.command("stop") & filters.chat(APPROVED_GROUPS))
+async def stop_media(client, message):
+    chat_id = message.chat.id
+    if chat_id in current_calls:
         await pytgcalls.leave_group_call(chat_id)
-    except:
-        pass
+        current_calls.pop(chat_id, None)
+        await message.reply_text("Stopped streaming and left VC.")
+    else:
+        await message.reply_text("Not streaming anything in this VC.")
 
-# --- Run bot ---
+# Auto-start PyTgCalls
 async def main():
     await app.start()
     await pytgcalls.start()
-    print("Bot is running...")
-    await asyncio.get_event_loop().run_forever()
+    print("Bot is online...")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())

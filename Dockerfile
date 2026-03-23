@@ -1,32 +1,32 @@
-# Use official Node + Python image
-FROM node:20-bullseye
+# Base Python 3.11 image
+FROM python:3.11-slim
 
-# Set working directory
+# Environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install Node.js, ffmpeg, build tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    ffmpeg \
+    build-essential \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && node -v \
+    && npm -v \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Working directory
 WORKDIR /app
 
-# Install Python 3.11
-RUN apt-get update && \
-    apt-get install -y python3.11 python3.11-venv python3.11-dev ffmpeg git && \
-    apt-get clean
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
+# Copy bot code
 COPY . .
 
-# Setup virtualenv
-RUN python3.11 -m venv venv
-RUN . venv/bin/activate
-
-# Upgrade pip
-RUN ./venv/bin/pip install --upgrade pip
-
-# Install requirements
-RUN ./venv/bin/pip install -r requirements.txt
-
-# Ensure start.sh is executable
-RUN chmod +x start.sh
-
-# Set environment variable for PyTgCalls to find Node
-ENV NODE_PATH=/usr/local/lib/node_modules
-
 # Start bot
-CMD ["./start.sh"]
+CMD ["python", "main.py"]
