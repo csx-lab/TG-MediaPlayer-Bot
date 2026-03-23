@@ -6,7 +6,7 @@ from pyrogram.types import Message
 from pytgcalls import PyTgCalls
 from pytgcalls.types import Update
 from pytgcalls.types.stream import StreamAudioEnded
-from pytgcalls.types.input_stream import InputStream, InputAudioStream
+from py_tgcalls import InputMode  # Updated import
 
 # --- Node.js check ---
 try:
