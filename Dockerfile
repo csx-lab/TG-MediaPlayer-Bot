@@ -1,5 +1,5 @@
-# Dockerfile
-FROM python:3.11-slim
+# Start with the base image
+FROM python:3.10-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -12,29 +12,40 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js (16.x)
+# Install Node.js (as required by your project)
 RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
     && apt-get install -y nodejs
 
-# Verify installation of Node.js
+# Check Node.js installation
 RUN echo "Checking Node.js installation..." \
     && node -v \
     && npm -v
 
-# Set working directory
+# Set up a virtual environment
+RUN python -m venv /env
+ENV PATH="/env/bin:$PATH"
+
+# Set the working directory
 WORKDIR /app
 
-# Copy the requirements file and install dependencies
+# Copy the requirements file
 COPY requirements.txt .
 
-# Install ntgcalls first (make sure it is compatible with the current Python version)
-RUN pip install --no-cache-dir ntgcalls
-
-# Install Python dependencies from requirements.txt (which includes py-tgcalls)
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the code into the container
+# Reinstall ntgcalls explicitly to avoid any potential issues
+RUN pip uninstall -y ntgcalls \
+    && pip install ntgcalls
+
+# Install py-tgcalls as an alternative in case ntgcalls still causes issues
+RUN pip install py-tgcalls
+
+# Install additional Python dependencies if required
+RUN pip install aiofiles==0.8.0
+
+# Copy the rest of your application code
 COPY . .
 
-# Run the bot or application
+# Set the entrypoint for your app (update as per your application entry point)
 CMD ["python", "main.py"]
