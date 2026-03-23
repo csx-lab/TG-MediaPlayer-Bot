@@ -5,7 +5,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from pytgcalls import PyTgCalls
 from pytgcalls.types.input_stream import InputAudioStream, InputVideoStream
 from pytgcalls.types.input_stream.quality import HighQualityAudio
-import imageio_ffmpeg as ffmpeg
 
 # --- Env vars ---
 API_ID = int(os.environ.get("API_ID"))
@@ -53,7 +52,7 @@ async def play_media(client: Client, message: Message):
     else:
         stream = InputVideoStream(replied_msg.file_id)
 
-    # Inline controls
+    # Inline buttons
     buttons = InlineKeyboardMarkup(
         [
             [
@@ -64,7 +63,7 @@ async def play_media(client: Client, message: Message):
     )
     await message.reply_text("Starting playback...", reply_markup=buttons)
 
-    # Join VC / start group call
+    # Auto-join VC or start if not active
     try:
         await pytgcalls.join_group_call(chat_id, stream)
     except Exception as e:
@@ -90,6 +89,14 @@ async def button_cb(client, callback_query):
             await callback_query.message.edit_text("Playback stopped.")
         except:
             await callback_query.answer("Failed to stop.")
+
+# --- Auto-leave after media ends ---
+@pytgcalls.on_stream_end()
+async def auto_leave(_, chat_id: int):
+    try:
+        await pytgcalls.leave_group_call(chat_id)
+    except:
+        pass
 
 # --- Run bot ---
 async def main():
