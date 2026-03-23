@@ -1,9 +1,10 @@
 import os
 import asyncio
 from pyrogram import Client, filters, idle
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
 from pytgcalls.types import InputAudioStream
+from pytgcalls.exceptions import GroupCallNotFound
 import yt_dlp
 
 # --- ENV ---
@@ -11,165 +12,190 @@ API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 APPROVED_GROUPS = os.environ.get("APPROVED_GROUPS", "")
-
 approved_group_ids = [int(x) for x in APPROVED_GROUPS.split(",") if x.strip()]
 
 # --- CLIENTS ---
-app = Client("vplay_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("music_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 pytgcalls = PyTgCalls(app)
 
-# --- QUEUE ---
-queues = {}  # {chat_id: [file_path, file_path, ...]}
+# --- GLOBAL STATE (per group) ---
+queues = {}       # chat_id -> list of tracks
+playing = {}      # chat_id -> current track
+locks = {}        # chat_id -> asyncio.Lock to avoid race conditions
 
-
-# =========================
-# HELPERS
-# =========================
+# --- HELPERS ---
 def is_approved(chat_id):
     return chat_id in approved_group_ids
 
+def add_track(chat_id, track):
+    queues.setdefault(chat_id, []).append(track)
+    locks.setdefault(chat_id, asyncio.Lock())
 
-def add_to_queue(chat_id, file):
-    queues.setdefault(chat_id, []).append(file)
-
-
-def pop_queue(chat_id):
+def pop_track(chat_id):
     if queues.get(chat_id):
         return queues[chat_id].pop(0)
+    return None
 
+def player_buttons():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Skip", callback_data="skip"),
+         InlineKeyboardButton("Stop", callback_data="stop")],
+        [InlineKeyboardButton("Pause", callback_data="pause"),
+         InlineKeyboardButton("Resume", callback_data="resume")],
+        [InlineKeyboardButton("Queue", callback_data="queue")]
+    ])
 
-async def ensure_call(chat_id):
-    """Join or start VC"""
+async def ensure_vc(chat_id, stream):
     try:
-        await pytgcalls.join_group_call(chat_id, InputAudioStream("silence.mp3"))
-    except:
-        try:
-            await app.invoke(
-                # starts voice chat
-                raw.functions.phone.CreateGroupCall(
-                    peer=await app.resolve_peer(chat_id),
-                    random_id=app.rnd_id()
-                )
-            )
-        except:
-            pass
-
-
-async def play_next(chat_id):
-    file = pop_queue(chat_id)
-    if not file:
-        await pytgcalls.leave_group_call(chat_id)
-        return
-
-    stream = InputAudioStream(file)
-    await pytgcalls.join_group_call(chat_id, stream)
-
+        await pytgcalls.join_group_call(chat_id, stream)
+    except GroupCallNotFound:
+        await pytgcalls.create_group_call(chat_id)
+        await asyncio.sleep(2)
+        await pytgcalls.join_group_call(chat_id, stream)
 
 # =========================
-# DISPLAY GROUP ID
+# PLAY NEXT TRACK
+# =========================
+async def play_next(chat_id):
+    async with locks[chat_id]:
+        track = pop_track(chat_id)
+        if not track:
+            playing.pop(chat_id, None)
+            try:
+                await pytgcalls.leave_group_call(chat_id)
+            except: pass
+            return
+
+        playing[chat_id] = track
+        stream = InputAudioStream(track["url"])
+
+        try:
+            await ensure_vc(chat_id, stream)
+        except Exception as e:
+            print(f"Error joining VC for {chat_id}: {e}")
+            queues.setdefault(chat_id, []).insert(0, track)
+            playing.pop(chat_id, None)
+
+# =========================
+# DISPLAY GROUP ID (admin only)
 # =========================
 @app.on_message(filters.command("displaygroupid"))
-async def display_group_id(client, message):
+async def display_group_id(client, message: Message):
     chat_id = message.chat.id
-
-    if message.chat.type in ["group", "supergroup"]:
-        member = await client.get_chat_member(chat_id, message.from_user.id)
-        if member.status not in ("administrator", "creator"):
-            return await message.reply_text("Admins only.")
-
-    await message.reply_text(f"`{chat_id}`")
-
+    try:
+        if message.chat.type in ["group", "supergroup"]:
+            member = await client.get_chat_member(chat_id, message.from_user.id)
+            if member.status not in ("administrator", "creator"):
+                return await message.reply_text("Admins only.")
+        await message.reply_text(f"Group ID: {chat_id}")
+    except Exception as e:
+        await message.reply_text(f"Error: {e}")
 
 # =========================
-# PLAY (YOUTUBE)
+# PLAY COMMAND (YouTube smart)
 # =========================
 @app.on_message(filters.command("play") & filters.group)
-async def play(client: Client, message: Message):
+async def play_command(client, message: Message):
     chat_id = message.chat.id
-
     if not is_approved(chat_id):
-        return await message.reply_text("Not approved.")
+        return await message.reply_text("This group is not approved.")
 
     if len(message.command) < 2:
-        return await message.reply_text("Usage: /play song name")
+        return await message.reply_text("Usage: /play <song name or URL>")
 
     query = " ".join(message.command[1:])
-
-    msg = await message.reply_text("Searching...")
+    msg = await message.reply_text("Processing...")
 
     ydl_opts = {
         "format": "bestaudio",
         "quiet": True,
-        "outtmpl": "yt_%(id)s.%(ext)s"
+        "noplaylist": False,  # allow playlist
+        "extract_flat": True,  # faster for playlists
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch:{query}", download=True)["entries"][0]
-            file = ydl.prepare_filename(info)
+            info = ydl.extract_info(query, download=False)
 
-        add_to_queue(chat_id, file)
+            # if it's a playlist, queue each entry
+            if "entries" in info:
+                for entry in info["entries"]:
+                    url = entry["url"]
+                    title = entry.get("title", "Unknown")
+                    add_track(chat_id, {"title": title, "url": url, "type": "yt"})
+                await msg.edit(f"Added playlist with {len(info['entries'])} tracks", reply_markup=player_buttons())
+            else:
+                url = info["url"]
+                title = info.get("title", "Unknown")
+                add_track(chat_id, {"title": title, "url": url, "type": "yt"})
+                await msg.edit(f"Added to queue: {title}", reply_markup=player_buttons())
 
-        await msg.edit(f"Added to queue:\n{info['title']}")
-
-        if len(queues[chat_id]) == 1:
-            await play_next(chat_id)
+        # start playback if nothing is playing
+        if chat_id not in playing:
+            asyncio.create_task(play_next(chat_id))
 
     except Exception as e:
-        await msg.edit(f"Error:\n{e}")
-
-
+        await msg.edit(f"Error: {e}")
+        
 # =========================
-# VPLAY (REPLY MEDIA)
+# VPLAY COMMAND (local media reply)
 # =========================
 @app.on_message(filters.command("vplay") & filters.reply & filters.group)
-async def vplay(client, message):
+async def vplay_command(client, message: Message):
     chat_id = message.chat.id
-
     if not is_approved(chat_id):
-        return await message.reply_text("Not approved.")
+        return await message.reply_text("This group is not approved.")
 
     replied = message.reply_to_message
+    if not (replied.audio or replied.voice):
+        return await message.reply_text("Reply to audio/voice message.")
 
-    if not (replied.audio or replied.voice or replied.video):
-        return await message.reply_text("Reply to media.")
+    file_path = await replied.download()
+    add_track(chat_id, {"title": replied.file_name or "Media", "url": file_path, "type": "file"})
+    await message.reply_text(f"Added to queue: {replied.file_name}", reply_markup=player_buttons())
 
-    file = await replied.download()
-
-    add_to_queue(chat_id, file)
-
-    await message.reply_text("Added to queue")
-
-    if len(queues[chat_id]) == 1:
-        await play_next(chat_id)
-
+    if chat_id not in playing:
+        asyncio.create_task(play_next(chat_id))
 
 # =========================
-# SKIP
+# CALLBACK BUTTONS
 # =========================
-@app.on_message(filters.command("skip") & filters.group)
-async def skip(_, message):
-    chat_id = message.chat.id
+@app.on_callback_query()
+async def button_handler(client, callback_query):
+    chat_id = callback_query.message.chat.id
+    data = callback_query.data
+    current = playing.get(chat_id)
 
-    if queues.get(chat_id):
-        await play_next(chat_id)
-        await message.reply_text("Skipped.")
-    else:
-        await message.reply_text("Queue empty.")
-
+    if data == "skip":
+        asyncio.create_task(play_next(chat_id))
+        await callback_query.answer("Skipped track")
+    elif data == "stop":
+        queues[chat_id] = []
+        try: await pytgcalls.leave_group_call(chat_id)
+        except: pass
+        playing.pop(chat_id, None)
+        await callback_query.answer("Stopped playback")
+    elif data == "pause":
+        if current:
+            await pytgcalls.pause_stream(chat_id)
+            await callback_query.answer("Paused")
+    elif data == "resume":
+        if current:
+            await pytgcalls.resume_stream(chat_id)
+            await callback_query.answer("Resumed")
+    elif data == "queue":
+        q_text = "\n".join([f"{i+1}. {t['title']}" for i, t in enumerate(queues.get(chat_id, []))])
+        if not q_text:
+            q_text = "Queue is empty."
+        await callback_query.answer(q_text, show_alert=True)
 
 # =========================
-# STOP
+# TRACK-END EVENT
 # =========================
-@app.on_message(filters.command("stop") & filters.group)
-async def stop(_, message):
-    chat_id = message.chat.id
-
-    queues[chat_id] = []
-    await pytgcalls.leave_group_call(chat_id)
-
-    await message.reply_text("Stopped.")
-
+@pytgcalls.on_stream_end()
+async def on_stream_end(_, update):
+    chat_id = update.chat_id
+    asyncio.create_task(play_next(chat_id))
 
 # =========================
 # MAIN
@@ -177,9 +203,8 @@ async def stop(_, message):
 async def main():
     await app.start()
     await pytgcalls.start()
-    print("Bot running")
-    await idle()
-
+    print("Bot is running")
+    idle()
 
 if __name__ == "__main__":
     asyncio.run(main())
