@@ -32,6 +32,8 @@ COPY . .
 
 # Replace the `InputMode` import from `ntgcalls` with an alternative from `py_tgcalls`
 RUN sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' /app/main.py
+# Patching the imports in `media_stream.py` to replace ntgcalls with py_tgcalls
+RUN sed -i 's/from ntgcalls import InputMode/from py_tgcalls import InputMode/g' /app/env/lib/python3.10/site-packages/pytgcalls/types/stream/media_stream.py
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
